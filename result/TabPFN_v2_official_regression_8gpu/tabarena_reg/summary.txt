@@ -1,0 +1,9 @@
+discovered_datasets: 13
+processed_datasets: 13
+ok_count: 6
+failed_count: 7
+avg_r2_ok: 0.785956
+avg_rmse_ok: 796.564707
+avg_mae_ok: 560.005129
+wall_seconds: 68.515
+failed_datasets: 46934__houses.csv, 46942__miami_housing.csv, 46949__physiochemical_protein.csv, 46953__QSAR-TID-11.csv, 46923__diamonds.csv, 46961__superconductivity.csv, 46928__Food_Delivery_Time.csv

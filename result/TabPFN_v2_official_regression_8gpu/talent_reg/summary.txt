@@ -1,0 +1,9 @@
+discovered_datasets: 100
+processed_datasets: 100
+ok_count: 67
+failed_count: 33
+avg_r2_ok: 0.706082
+avg_rmse_ok: 18303.178287
+avg_mae_ok: 13007.769761
+wall_seconds: 68.515
+failed_datasets: BNG_lowbwt.csv, CookbookReviews.csv, fifa.csv, house_sales_reduced.csv, steel_industry_energy_consumption.csv, 2dplanes.csv, BNG_mv.csv, NASA_PHM2008.csv, Superconductivty.csv, avocado_sales.csv, fried.csv, houses.csv, BNG_stock.csv, Diamonds.csv, 3D_Estimation_using_RSSI_of_WLAN_dataset_complete_1_target.csv, Facebook_Comment_Volume.csv, OnlineNewsPopularity.csv, gas_turbine_CO_and_NOx_emission.csv, Food_Delivery_Time.csv, Large-scale_Wave_Energy_Farm_Sydney_49.csv, Ailerons.csv, house_16H.csv, mv.csv, MiamiHousing2016.csv, Physicochemical_r.csv, house_8L.csv, pol.csv, BNG_echoMonths.csv, CPS1988.csv, Job_Profitability.csv, elevators.csv, pole.csv, volume.csv

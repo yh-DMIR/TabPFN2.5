@@ -1,0 +1,9 @@
+discovered_datasets: 148
+processed_datasets: 148
+ok_count: 95
+failed_count: 53
+avg_r2_ok: 0.715512
+avg_rmse_ok: 13013.015491
+avg_mae_ok: 9241.292928
+wall_seconds: 68.515
+failed_datasets: 44964__superconductivity.csv, BNG_lowbwt.csv, CookbookReviews.csv, fifa.csv, house_sales_reduced.csv, steel_industry_energy_consumption.csv, 44974__video_transcoding.csv, 44983__miami_housing.csv, 45012__fifa.csv, 46934__houses.csv, 2dplanes.csv, BNG_mv.csv, NASA_PHM2008.csv, Superconductivty.csv, avocado_sales.csv, fried.csv, houses.csv, 44975__wave_energy.csv, 44984__cps88wages.csv, 46942__miami_housing.csv, BNG_stock.csv, Diamonds.csv, 44976__sarcos.csv, 46949__physiochemical_protein.csv, 3D_Estimation_using_RSSI_of_WLAN_dataset_complete_1_target.csv, Facebook_Comment_Volume.csv, OnlineNewsPopularity.csv, gas_turbine_CO_and_NOx_emission.csv, 44977__california_housing.csv, 44989__kings_county.csv, 46953__QSAR-TID-11.csv, Food_Delivery_Time.csv, Large-scale_Wave_Energy_Farm_Sydney_49.csv, Ailerons.csv, house_16H.csv, mv.csv, 44979__diamonds.csv, 44992__fps_benchmark.csv, 46923__diamonds.csv, 46961__superconductivity.csv, MiamiHousing2016.csv, Physicochemical_r.csv, house_8L.csv, pol.csv, 44963__physiochemical_protein.csv, 44993__health_insurance.csv, 46928__Food_Delivery_Time.csv, BNG_echoMonths.csv, CPS1988.csv, Job_Profitability.csv, elevators.csv, pole.csv, volume.csv
