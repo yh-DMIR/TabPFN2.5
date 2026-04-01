@@ -227,9 +227,9 @@ def worker_main(
     try:
         ensure_runtime_deps()
         gpu_id_str = str(gpu_id)
-        os.environ["HIP_VISIBLE_DEVICES"] = gpu_id_str
         os.environ["ROCR_VISIBLE_DEVICES"] = gpu_id_str
-        os.environ["CUDA_VISIBLE_DEVICES"] = gpu_id_str
+        os.environ.pop("HIP_VISIBLE_DEVICES", None)
+        os.environ.pop("CUDA_VISIBLE_DEVICES", None)
         os.environ.setdefault("OMP_NUM_THREADS", "1")
         os.environ.setdefault("MKL_NUM_THREADS", "1")
 
