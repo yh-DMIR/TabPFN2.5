@@ -1,0 +1,9 @@
+discovered_datasets: 100
+processed_datasets: 100
+ok_count: 99
+failed_count: 1
+avg_r2_ok: 0.742402
+avg_rmse_ok: 15262.172019
+avg_mae_ok: 10409.936942
+wall_seconds: 248.113
+failed_datasets: BNG_mv.csv

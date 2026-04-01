@@ -1,0 +1,9 @@
+discovered_datasets: 148
+processed_datasets: 148
+ok_count: 145
+failed_count: 3
+avg_r2_ok: 0.745272
+avg_rmse_ok: 12639.072383
+avg_mae_ok: 8262.536217
+wall_seconds: 248.113
+failed_datasets: 44974__video_transcoding.csv, BNG_mv.csv, 44975__wave_energy.csv
