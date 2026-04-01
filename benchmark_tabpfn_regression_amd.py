@@ -215,7 +215,9 @@ def evaluate_one_dataset(
 def worker_main(
     worker_id: int,
     gpu_id: int,
-    task_queue,
+    assigned_csv_paths: List[str],
+    ready_queue,
+    start_event,
     worker_out_csv: str,
     model_kwargs: Dict,
     test_size: float,
@@ -244,13 +246,18 @@ def worker_main(
         worker_kwargs = dict(model_kwargs)
         worker_kwargs["device"] = "cuda:0"
         regressor = TabPFNRegressor(**worker_kwargs)
+        ready_queue.put(
+            {
+                "worker_id": worker_id,
+                "gpu_id": gpu_id,
+                "status": "ready",
+                "assigned_count": len(assigned_csv_paths),
+            }
+        )
+        start_event.wait()
 
         rows: List[ResultRow] = []
-        while True:
-            item = task_queue.get()
-            if item is None:
-                break
-
+        for item in assigned_csv_paths:
             csv_path = Path(item)
             row = evaluate_one_dataset(
                 regressor,
@@ -274,6 +281,17 @@ def worker_main(
 
         pd.DataFrame([asdict(row) for row in rows]).to_csv(worker_out_csv, index=False)
     except Exception:
+        try:
+            ready_queue.put(
+                {
+                    "worker_id": worker_id,
+                    "gpu_id": gpu_id,
+                    "status": "crash",
+                    "error": traceback.format_exc(),
+                }
+            )
+        except Exception:
+            pass
         crash_row = pd.DataFrame(
             [
                 {
@@ -363,7 +381,7 @@ def main() -> None:
         "--model-path",
         default="ckpt/TabPFN-2.5/tabpfn-v2.5-regressor-v2.5_default.ckpt",
     )
-    parser.add_argument("--out-dir", default="result/TabPFN_2_5_official_regression")
+    parser.add_argument("--out-dir", default="result/TabPFN_2_5_official_regression_8gpu")
     parser.add_argument("--workers", type=int, default=8)
     parser.add_argument("--gpus", default="0,1,2,3,4,5,6,7")
     parser.add_argument("--n-estimators", type=int, default=8)
@@ -422,15 +440,13 @@ def main() -> None:
         pass
 
     start_time = time.time()
-    task_queue: mp.Queue = mp.Queue()
-    for csv_path in csv_files:
-        task_queue.put(str(csv_path))
-    for _ in range(args.workers):
-        task_queue.put(None)
+    ready_queue: mp.Queue = mp.Queue()
+    start_event = mp.Event()
 
     worker_csv_paths: List[Path] = []
     processes: List[mp.Process] = []
     for worker_id in range(args.workers):
+        assigned_csv_paths = [str(path) for path in csv_files[worker_id::args.workers]]
         worker_csv = out_dir / f"worker_{worker_id}.csv"
         worker_csv_paths.append(worker_csv)
         proc = mp.Process(
@@ -438,7 +454,9 @@ def main() -> None:
             args=(
                 worker_id,
                 gpu_ids[worker_id],
-                task_queue,
+                assigned_csv_paths,
+                ready_queue,
+                start_event,
                 str(worker_csv),
                 dict(model_kwargs),
                 args.test_size,
@@ -449,6 +467,40 @@ def main() -> None:
         )
         proc.start()
         processes.append(proc)
+
+    ready_workers: set[int] = set()
+    while len(ready_workers) < args.workers:
+        try:
+            message = ready_queue.get(timeout=10)
+        except Exception:
+            dead_workers = [
+                str(idx)
+                for idx, proc in enumerate(processes)
+                if not proc.is_alive() and idx not in ready_workers
+            ]
+            if dead_workers:
+                raise RuntimeError(
+                    "Some workers exited before initialization completed: "
+                    + ", ".join(dead_workers)
+                )
+            continue
+
+        if message.get("status") == "ready":
+            ready_workers.add(int(message["worker_id"]))
+            if args.verbose:
+                print(
+                    f"[worker {message['worker_id']} | gpu {message['gpu_id']}] "
+                    f"ready assigned={message.get('assigned_count', '?')}"
+                )
+            continue
+
+        if message.get("status") == "crash":
+            raise RuntimeError(
+                f"Worker {message['worker_id']} on gpu {message['gpu_id']} crashed "
+                f"during initialization:\n{message.get('error', '(no traceback)')}"
+            )
+
+    start_event.set()
 
     for proc in processes:
         proc.join()
