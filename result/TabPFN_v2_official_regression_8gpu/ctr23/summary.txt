@@ -1,9 +1,9 @@
 discovered_datasets: 35
 processed_datasets: 35
-ok_count: 22
-failed_count: 13
-avg_r2_ok: 0.725020
-avg_rmse_ok: 233.824463
-avg_mae_ok: 138.282885
-wall_seconds: 68.515
-failed_datasets: 44964__superconductivity.csv, 44974__video_transcoding.csv, 44983__miami_housing.csv, 45012__fifa.csv, 44975__wave_energy.csv, 44984__cps88wages.csv, 44976__sarcos.csv, 44977__california_housing.csv, 44989__kings_county.csv, 44979__diamonds.csv, 44992__fps_benchmark.csv, 44963__physiochemical_protein.csv, 44993__health_insurance.csv
+ok_count: 35
+failed_count: 0
+avg_r2_ok: 0.762045
+avg_rmse_ok: 7791.931316
+avg_mae_ok: 3873.341034
+wall_seconds: 369.949
+failed_datasets: (none)
