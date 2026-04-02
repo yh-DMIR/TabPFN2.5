@@ -396,7 +396,20 @@ def main() -> None:
         choices=["auto", "autocast"],
     )
     parser.add_argument("--memory-saving-mode", default="auto")
-    parser.add_argument("--ignore-pretraining-limits", action="store_true")
+    limit_group = parser.add_mutually_exclusive_group()
+    limit_group.add_argument(
+        "--ignore-pretraining-limits",
+        dest="ignore_pretraining_limits",
+        action="store_true",
+        help="Ignore TabPFN's pretraining sample/feature limits. Enabled by default.",
+    )
+    limit_group.add_argument(
+        "--enforce-pretraining-limits",
+        dest="ignore_pretraining_limits",
+        action="store_false",
+        help="Re-enable TabPFN's pretraining sample/feature limit checks.",
+    )
+    parser.set_defaults(ignore_pretraining_limits=True)
     parser.add_argument("--test-size", type=float, default=0.2)
     parser.add_argument("--random-state", type=int, default=42)
     parser.add_argument("--verbose", action="store_true")
@@ -428,8 +441,7 @@ def main() -> None:
         "n_preprocessing_jobs": 1,
         "random_state": args.random_state,
     }
-    if args.ignore_pretraining_limits:
-        model_kwargs["ignore_pretraining_limits"] = True
+    model_kwargs["ignore_pretraining_limits"] = args.ignore_pretraining_limits
 
     os.environ.setdefault("OMP_NUM_THREADS", "1")
     os.environ.setdefault("MKL_NUM_THREADS", "1")

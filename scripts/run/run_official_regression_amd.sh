@@ -25,4 +25,5 @@ ${PYTHON} ${SCRIPT} \
   --fit-mode fit_preprocessors \
   --inference-precision auto \
   --memory-saving-mode auto \
+  --ignore-pretraining-limits \
   --verbose
