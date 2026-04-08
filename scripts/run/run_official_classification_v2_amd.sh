@@ -12,7 +12,8 @@ export TABPFN_DISABLE_TELEMETRY=1
 PYTHON=${PYTHON:-python}
 SCRIPT=${SCRIPT:-benchmark_tabpfn_classification_amd.py}
 ROOT=${ROOT:-.}
-BENCHMARKS=${BENCHMARKS:-tabarena_cls=dataset/tabarena/cls,talent_binclass=dataset/talent_cls/binclass,talent_multiclass=dataset/talent_cls/multiclass}
+BENCHMARKS=${BENCHMARKS:-openml_cc18_csv=dataset/openml_cc18_72,tabarena_cls=dataset/tabarena/cls,tabzilla_csv=dataset/tabzilla35,talent_cls=dataset/talent_cls}
+#BENCHMARKS=${BENCHMARKS:-tabarena_cls=dataset/tabarena/cls,talent_binclass=dataset/talent_cls/binclass,talent_multiclass=dataset/talent_cls/multiclass}
 MODEL_PATH=${MODEL_PATH:-ckpt/TabPFN-2.5/tabpfn-v2-classifier.ckpt}
 OUT_DIR=${OUT_DIR:-result/TabPFN_v2_official_classification_8gpu}
 WORKERS=${WORKERS:-8}
