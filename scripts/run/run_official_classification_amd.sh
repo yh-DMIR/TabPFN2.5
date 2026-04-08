@@ -17,7 +17,7 @@ BENCHMARKS=${BENCHMARKS:-openml_cc18_csv=dataset/openml_cc18_72,tabarena_cls=dat
 MODEL_PATH=${MODEL_PATH:-ckpt/TabPFN-2.5/tabpfn-v2.5-classifier-v2.5_default.ckpt}
 OUT_DIR=${OUT_DIR:-result/TabPFN_2_5_official_classification_8gpu}
 WORKERS=${WORKERS:-8}
-GPUS=${GPUS:-0,1,3,4,5,6,7}
+GPUS=${GPUS:-0,1,2,3,4,5,6,7}
 
 ${PYTHON} ${SCRIPT} \
   --root "${ROOT}" \
