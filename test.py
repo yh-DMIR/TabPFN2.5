@@ -34,6 +34,9 @@ accuracy_score = None
 f1_score = None
 log_loss = None
 train_test_split = None
+_MANYCLASS_CLASS = None
+_MANYCLASS_IMPORT_ATTEMPTED = False
+_MANYCLASS_IMPORT_ERROR = None
 
 
 @dataclass
@@ -180,11 +183,50 @@ def collect_torch_diagnostics() -> Dict[str, object]:
     }
 
 
+def get_manyclass_classifier():
+    global _MANYCLASS_CLASS
+    global _MANYCLASS_IMPORT_ATTEMPTED
+    global _MANYCLASS_IMPORT_ERROR
+
+    if _MANYCLASS_IMPORT_ATTEMPTED:
+        return _MANYCLASS_CLASS
+
+    _MANYCLASS_IMPORT_ATTEMPTED = True
+    try:
+        from tabpfn_extensions.manyclass_classifier import ManyClassClassifier
+
+        _MANYCLASS_CLASS = ManyClassClassifier
+    except Exception as exc:
+        _MANYCLASS_CLASS = None
+        _MANYCLASS_IMPORT_ERROR = f"{type(exc).__name__}: {exc}"
+
+    return _MANYCLASS_CLASS
+
+
+def build_classifier(model_kwargs: Dict[str, object], n_classes: int):
+    from tabpfn import TabPFNClassifier
+
+    worker_kwargs = dict(model_kwargs)
+    worker_kwargs["device"] = "cuda:0"
+    base_clf = TabPFNClassifier(**worker_kwargs)
+
+    if n_classes <= 10:
+        return base_clf, "tabpfn"
+
+    ManyClassClassifier = get_manyclass_classifier()
+    if ManyClassClassifier is not None:
+        return ManyClassClassifier(estimator=base_clf), "manyclass"
+
+    from sklearn.multiclass import OneVsRestClassifier
+
+    return OneVsRestClassifier(base_clf), "ovr"
+
+
 def evaluate_one_dataset(
-    clf,
     benchmark: str,
     csv_path: Path,
     *,
+    model_kwargs: Dict[str, object],
     test_size: float,
     random_state: int,
 ) -> ResultRow:
@@ -197,6 +239,7 @@ def evaluate_one_dataset(
 
         X = df.drop(columns=[target_col])
         y = df[target_col]
+        n_classes_raw = int(y.nunique(dropna=True))
 
         if len(X) < 2:
             raise ValueError("Not enough valid rows after dropping missing target.")
@@ -216,6 +259,8 @@ def evaluate_one_dataset(
                 test_size=test_size,
                 random_state=random_state,
             )
+
+        clf, _strategy = build_classifier(model_kwargs, n_classes_raw)
 
         t0 = time.time()
         clf.fit(X_train, y_train)
@@ -293,16 +338,7 @@ def run_worker(
         os.environ.setdefault("MKL_NUM_THREADS", "1")
 
         import torch
-        from tabpfn import TabPFNClassifier
         # 核心修改：导入 ManyClassClassifier 扩展包
-        try:
-            from tabpfn_extensions.manyclass_classifier import ManyClassClassifier
-        except ImportError:
-            raise ImportError(
-                "Could not import ManyClassClassifier. "
-                "Please install it via: pip install 'tabpfn-extensions[many_class]'"
-            )
-
         torch_diag = collect_torch_diagnostics()
         if not torch.cuda.is_available():
             raise RuntimeError(
@@ -310,13 +346,9 @@ def run_worker(
                 f"Diagnostics: {json.dumps(torch_diag, ensure_ascii=False)}"
             )
 
-        worker_kwargs = dict(model_kwargs)
-        worker_kwargs["device"] = "cuda:0"
         
         # 核心逻辑：用 ManyClassClassifier 包装原有的 TabPFNClassifier
         # 当类别数 > 10 时，它会自动采用拆分策略绕过限制
-        base_clf = TabPFNClassifier(**worker_kwargs)
-        clf = ManyClassClassifier(estimator=base_clf)
 
         ready_queue.put(
             {
@@ -331,9 +363,9 @@ def run_worker(
         rows: List[ResultRow] = []
         for benchmark, csv_path_str in task_items:
             row = evaluate_one_dataset(
-                clf,
                 benchmark=benchmark,
                 csv_path=Path(csv_path_str),
+                model_kwargs=model_kwargs,
                 test_size=test_size,
                 random_state=random_state,
             )
