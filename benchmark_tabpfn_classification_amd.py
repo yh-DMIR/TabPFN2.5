@@ -34,6 +34,9 @@ accuracy_score = None
 f1_score = None
 log_loss = None
 train_test_split = None
+_MANYCLASS_CLASS = None
+_MANYCLASS_IMPORT_ATTEMPTED = False
+_MANYCLASS_IMPORT_ERROR = None
 
 
 @dataclass
@@ -180,11 +183,50 @@ def collect_torch_diagnostics() -> Dict[str, object]:
     }
 
 
+def get_manyclass_classifier():
+    global _MANYCLASS_CLASS
+    global _MANYCLASS_IMPORT_ATTEMPTED
+    global _MANYCLASS_IMPORT_ERROR
+
+    if _MANYCLASS_IMPORT_ATTEMPTED:
+        return _MANYCLASS_CLASS
+
+    _MANYCLASS_IMPORT_ATTEMPTED = True
+    try:
+        from tabpfn_extensions.manyclass_classifier import ManyClassClassifier
+
+        _MANYCLASS_CLASS = ManyClassClassifier
+    except Exception as exc:
+        _MANYCLASS_CLASS = None
+        _MANYCLASS_IMPORT_ERROR = f"{type(exc).__name__}: {exc}"
+
+    return _MANYCLASS_CLASS
+
+
+def build_classifier(model_kwargs: Dict[str, object], n_classes: int):
+    from tabpfn import TabPFNClassifier
+
+    worker_kwargs = dict(model_kwargs)
+    worker_kwargs["device"] = "cuda:0"
+    base_clf = TabPFNClassifier(**worker_kwargs)
+
+    if n_classes <= 10:
+        return base_clf
+
+    ManyClassClassifier = get_manyclass_classifier()
+    if ManyClassClassifier is not None:
+        return ManyClassClassifier(estimator=base_clf)
+
+    from sklearn.multiclass import OneVsRestClassifier
+
+    return OneVsRestClassifier(base_clf)
+
+
 def evaluate_one_dataset(
-    clf,
     benchmark: str,
     csv_path: Path,
     *,
+    model_kwargs: Dict[str, object],
     test_size: float,
     random_state: int,
 ) -> ResultRow:
@@ -197,6 +239,7 @@ def evaluate_one_dataset(
 
         X = df.drop(columns=[target_col])
         y = df[target_col]
+        n_classes_raw = int(y.nunique(dropna=True))
 
         if len(X) < 2:
             raise ValueError("Not enough valid rows after dropping missing target.")
@@ -216,6 +259,8 @@ def evaluate_one_dataset(
                 test_size=test_size,
                 random_state=random_state,
             )
+
+        clf = build_classifier(model_kwargs, n_classes_raw)
 
         t0 = time.time()
         clf.fit(X_train, y_train)
@@ -291,18 +336,12 @@ def run_worker(
         os.environ.setdefault("MKL_NUM_THREADS", "1")
 
         import torch
-        from tabpfn import TabPFNClassifier
-
         torch_diag = collect_torch_diagnostics()
         if not torch.cuda.is_available():
             raise RuntimeError(
                 "GPU backend is not available in this worker. "
                 f"Diagnostics: {json.dumps(torch_diag, ensure_ascii=False)}"
             )
-
-        worker_kwargs = dict(model_kwargs)
-        worker_kwargs["device"] = "cuda:0"
-        clf = TabPFNClassifier(**worker_kwargs)
 
         ready_queue.put(
             {
@@ -317,9 +356,9 @@ def run_worker(
         rows: List[ResultRow] = []
         for benchmark, csv_path_str in task_items:
             row = evaluate_one_dataset(
-                clf,
                 benchmark=benchmark,
                 csv_path=Path(csv_path_str),
+                model_kwargs=model_kwargs,
                 test_size=test_size,
                 random_state=random_state,
             )
