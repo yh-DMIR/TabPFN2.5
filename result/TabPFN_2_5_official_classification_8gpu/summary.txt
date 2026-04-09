@@ -1,0 +1,9 @@
+discovered_datasets: 345
+processed_datasets: 50
+ok_count: 42
+failed_count: 8
+avg_accuracy_ok: 0.820484
+avg_f1_weighted_ok: 0.808208
+avg_logloss_ok: 0.413754
+wall_seconds: 23210.216
+failed_datasets: 46947__online_shoppers_intention.csv, __WORKER_CRASH__0, __WORKER_CRASH__1, __WORKER_CRASH__3, __WORKER_CRASH__4, __WORKER_CRASH__5, __WORKER_CRASH__6, __WORKER_CRASH__7
