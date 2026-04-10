@@ -1,0 +1,9 @@
+discovered_datasets: 345
+processed_datasets: 345
+ok_count: 342
+failed_count: 3
+avg_accuracy_ok: 0.852294
+avg_f1_weighted_ok: 0.842335
+avg_logloss_ok: 0.355067
+wall_seconds: 34948.111
+failed_datasets: OpenML-ID-40923.csv, OpenML-ID-40927.csv, OpenML-ID-41159.csv
