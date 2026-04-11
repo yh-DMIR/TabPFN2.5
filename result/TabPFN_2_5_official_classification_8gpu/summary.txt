@@ -1,9 +1,9 @@
-discovered_datasets: 1
-processed_datasets: 1
-ok_count: 0
+discovered_datasets: 345
+processed_datasets: 302
+ok_count: 301
 failed_count: 1
-avg_accuracy_ok: (none)
-avg_f1_weighted_ok: (none)
-avg_logloss_ok: (none)
-wall_seconds: 14.524
+avg_accuracy_ok: 0.858644
+avg_f1_weighted_ok: 0.849972
+avg_logloss_ok: 0.332552
+wall_seconds: 121665.325
 failed_datasets: letter.csv

@@ -1,9 +1,9 @@
 discovered_datasets: 38
-processed_datasets: 5
-ok_count: 4
-failed_count: 1
-avg_accuracy_ok: 0.860348
-avg_f1_weighted_ok: 0.855100
-avg_logloss_ok: 0.324102
-wall_seconds: 23210.216
-failed_datasets: 46947__online_shoppers_intention.csv
+processed_datasets: 33
+ok_count: 33
+failed_count: 0
+avg_accuracy_ok: 0.880608
+avg_f1_weighted_ok: 0.868324
+avg_logloss_ok: 0.284880
+wall_seconds: 121665.325
+failed_datasets: (none)
