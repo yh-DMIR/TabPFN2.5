@@ -14,7 +14,7 @@ import time
 import traceback
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 REPO_ROOT = Path(__file__).resolve().parent
 SRC_DIR = REPO_ROOT / "src"
@@ -109,7 +109,7 @@ def infer_target_column(df) -> str:
     return df.columns[-1]
 
 
-def parse_benchmark_specs(root: Path, specs: List[str]) -> List[Tuple[str, Path]]:
+def parse_benchmark_specs(root: Path, specs: Sequence[str]) -> List[Tuple[str, Path]]:
     parsed: List[Tuple[str, Path]] = []
     for spec in specs:
         if "=" in spec:
@@ -138,14 +138,61 @@ def discover_csv_files(benchmark_dir: Path) -> List[Path]:
     return sorted(csv_files, key=lambda p: p.name)
 
 
-def build_tasks(root: Path, benchmark_specs: List[str]) -> Tuple[List[Tuple[str, str]], Dict[str, int]]:
+def normalize_skip_entry(entry: str) -> str:
+    return entry.strip().replace("\\", "/").lstrip("./").lower()
+
+
+def load_skip_entries(skip_file: Path | None) -> set[str]:
+    if skip_file is None or not skip_file.exists():
+        return set()
+
+    entries: set[str] = set()
+    for raw_line in skip_file.read_text(encoding="utf-8").splitlines():
+        line = raw_line.split("#", 1)[0].strip()
+        if not line:
+            continue
+        entries.add(normalize_skip_entry(line))
+    return entries
+
+
+def build_skip_tokens(benchmark_name: str, csv_path: Path) -> set[str]:
+    dataset_id = sanitize_dataset_id(csv_path)
+    dataset_name = csv_path.name
+    dataset_stem = csv_path.stem
+    benchmark_norm = normalize_skip_entry(benchmark_name)
+
+    return {
+        normalize_skip_entry(dataset_id),
+        normalize_skip_entry(dataset_name),
+        normalize_skip_entry(dataset_stem),
+        normalize_skip_entry(f"{benchmark_norm}/{dataset_id}"),
+        normalize_skip_entry(f"{benchmark_norm}/{dataset_name}"),
+        normalize_skip_entry(f"{benchmark_norm}/{dataset_stem}"),
+    }
+
+
+def build_tasks(
+    root: Path,
+    benchmark_specs: Sequence[str],
+    skip_entries: set[str],
+) -> Tuple[List[Tuple[str, str]], Dict[str, int], Dict[str, List[str]]]:
     tasks: List[Tuple[str, str]] = []
     discovered: Dict[str, int] = {}
+    skipped: Dict[str, List[str]] = {}
+
     for benchmark_name, benchmark_dir in parse_benchmark_specs(root, benchmark_specs):
         csv_files = discover_csv_files(benchmark_dir) if benchmark_dir.exists() else []
         discovered[benchmark_name] = len(csv_files)
-        tasks.extend((benchmark_name, str(csv_path)) for csv_path in csv_files)
-    return tasks, discovered
+        skipped[benchmark_name] = []
+
+        for csv_path in csv_files:
+            skip_tokens = build_skip_tokens(benchmark_name, csv_path)
+            if skip_entries and skip_tokens.intersection(skip_entries):
+                skipped[benchmark_name].append(csv_path.name)
+                continue
+            tasks.append((benchmark_name, str(csv_path)))
+
+    return tasks, discovered, skipped
 
 
 def shard_items(items: List[Tuple[str, str]], num_workers: int, worker_id: int) -> List[Tuple[str, str]]:
@@ -160,6 +207,21 @@ def normalize_local_ckpt_path(model_path: str) -> Path:
         pass
     if not path.exists():
         raise FileNotFoundError(f"Checkpoint not found: {path}")
+    return path
+
+
+def resolve_optional_path(root: Path, path_str: str | None) -> Path | None:
+    if path_str is None or not str(path_str).strip():
+        return None
+
+    path = Path(path_str).expanduser()
+    if not path.is_absolute():
+        path = root / path
+
+    try:
+        path = path.resolve()
+    except Exception:
+        pass
     return path
 
 
@@ -222,6 +284,23 @@ def build_classifier(model_kwargs: Dict[str, object], n_classes: int):
     return OneVsRestClassifier(base_clf)
 
 
+def predict_labels_from_proba(clf, proba) -> np.ndarray:
+    classes = getattr(clf, "classes_", None)
+    if classes is None:
+        raise AttributeError("Classifier does not expose classes_.")
+
+    classes_array = np.asarray(classes)
+    if proba.ndim != 2:
+        raise ValueError(f"Expected 2D probability array, got shape {proba.shape}.")
+    if len(classes_array) != proba.shape[1]:
+        raise ValueError(
+            f"classes_ length {len(classes_array)} does not match "
+            f"probability width {proba.shape[1]}."
+        )
+
+    return classes_array[np.argmax(proba, axis=1)]
+
+
 def evaluate_one_dataset(
     benchmark: str,
     csv_path: Path,
@@ -267,13 +346,14 @@ def evaluate_one_dataset(
         fit_seconds = time.time() - t0
 
         t1 = time.time()
-        y_pred = clf.predict(X_test)
+        proba = None
+        ll = None
         try:
             proba = clf.predict_proba(X_test)
-            ll = log_loss(y_test, proba, labels=clf.classes_)
+            y_pred = predict_labels_from_proba(clf, proba)
+            ll = log_loss(y_test, proba, labels=getattr(clf, "classes_", None))
         except Exception:
-            proba = None
-            ll = None
+            y_pred = clf.predict(X_test)
         predict_seconds = time.time() - t1
 
         n_classes = int(getattr(clf, "n_classes_", y_train.nunique()))
@@ -317,7 +397,7 @@ def evaluate_one_dataset(
 def run_worker(
     worker_id: int,
     gpu_id: int,
-    task_items: List[Tuple[str, str]],
+    task_queue,
     ready_queue,
     start_event,
     worker_out_csv: str,
@@ -327,8 +407,23 @@ def run_worker(
     verbose: bool,
 ) -> None:
     ensure_runtime_deps()
+    columns = list(ResultRow.__annotations__.keys())
+    worker_out_path = Path(worker_out_csv)
+
+    def initialize_worker_csv() -> None:
+        worker_out_path.parent.mkdir(parents=True, exist_ok=True)
+        pd.DataFrame(columns=columns).to_csv(worker_out_path, index=False)
+
+    def append_row_to_worker_csv(row: ResultRow) -> None:
+        pd.DataFrame([asdict(row)], columns=columns).to_csv(
+            worker_out_path,
+            mode="a",
+            header=False,
+            index=False,
+        )
 
     try:
+        initialize_worker_csv()
         gpu_id_str = str(gpu_id)
         os.environ["ROCR_VISIBLE_DEVICES"] = gpu_id_str
         os.environ.pop("HIP_VISIBLE_DEVICES", None)
@@ -337,6 +432,7 @@ def run_worker(
         os.environ.setdefault("MKL_NUM_THREADS", "1")
 
         import torch
+
         torch_diag = collect_torch_diagnostics()
         if not torch.cuda.is_available():
             raise RuntimeError(
@@ -349,13 +445,17 @@ def run_worker(
                 "worker_id": worker_id,
                 "gpu_id": gpu_id,
                 "status": "ready",
-                "assigned_count": len(task_items),
+                "assigned_count": "dynamic",
             }
         )
         start_event.wait()
 
-        rows: List[ResultRow] = []
-        for benchmark, csv_path_str in task_items:
+        while True:
+            task = task_queue.get()
+            if task is None:
+                break
+
+            benchmark, csv_path_str = task
             row = evaluate_one_dataset(
                 benchmark=benchmark,
                 csv_path=Path(csv_path_str),
@@ -363,7 +463,7 @@ def run_worker(
                 test_size=test_size,
                 random_state=random_state,
             )
-            rows.append(row)
+            append_row_to_worker_csv(row)
 
             if verbose:
                 if row.status == "ok":
@@ -378,10 +478,6 @@ def run_worker(
                     )
 
             clear_torch_cache()
-
-        columns = list(ResultRow.__annotations__.keys())
-        worker_df = pd.DataFrame([asdict(row) for row in rows]) if rows else pd.DataFrame(columns=columns)
-        worker_df.to_csv(worker_out_csv, index=False)
     except Exception:
         try:
             ready_queue.put(
@@ -394,27 +490,27 @@ def run_worker(
             )
         except Exception:
             pass
-        pd.DataFrame(
-            [
-                {
-                    "benchmark": "__worker__",
-                    "dataset_id": f"__WORKER_CRASH__{worker_id}",
-                    "dataset_dir": "__worker__",
-                    "dataset_name": f"__WORKER_CRASH__{worker_id}",
-                    "n_train": 0,
-                    "n_test": 0,
-                    "n_features": 0,
-                    "n_classes": None,
-                    "accuracy": None,
-                    "f1_weighted": None,
-                    "logloss": None,
-                    "fit_seconds": 0.0,
-                    "predict_seconds": 0.0,
-                    "status": "fail",
-                    "error": traceback.format_exc(),
-                }
-            ]
-        ).to_csv(worker_out_csv, index=False)
+        if not worker_out_path.exists():
+            initialize_worker_csv()
+        append_row_to_worker_csv(
+            ResultRow(
+                benchmark="__worker__",
+                dataset_id=f"__WORKER_CRASH__{worker_id}",
+                dataset_dir="__worker__",
+                dataset_name=f"__WORKER_CRASH__{worker_id}",
+                n_train=0,
+                n_test=0,
+                n_features=0,
+                n_classes=None,
+                accuracy=None,
+                f1_weighted=None,
+                logloss=None,
+                fit_seconds=0.0,
+                predict_seconds=0.0,
+                status="fail",
+                error=traceback.format_exc(),
+            )
+        )
 
 
 def collect_worker_outputs(out_dir: Path, workers: int) -> List:
@@ -430,7 +526,13 @@ def collect_worker_outputs(out_dir: Path, workers: int) -> List:
     return dfs
 
 
-def write_summary(summary_path: Path, result_df, discovered_datasets: int, wall_seconds: float) -> None:
+def write_summary(
+    summary_path: Path,
+    result_df,
+    discovered_datasets: int,
+    skipped_names: Sequence[str],
+    wall_seconds: float,
+) -> None:
     ensure_runtime_deps()
     ok_df = result_df[result_df["status"] == "ok"].copy() if len(result_df) else pd.DataFrame()
     failed_df = result_df[result_df["status"] == "fail"].copy() if len(result_df) else pd.DataFrame()
@@ -438,6 +540,7 @@ def write_summary(summary_path: Path, result_df, discovered_datasets: int, wall_
     lines = [
         f"discovered_datasets: {discovered_datasets}",
         f"processed_datasets: {len(result_df)}",
+        f"skipped_count: {len(skipped_names)}",
         f"ok_count: {len(ok_df)}",
         f"failed_count: {len(failed_df)}",
         (
@@ -464,6 +567,11 @@ def write_summary(summary_path: Path, result_df, discovered_datasets: int, wall_
     else:
         lines.append("failed_datasets: (none)")
 
+    if skipped_names:
+        lines.append(f"skipped_datasets: {', '.join(sorted(set(skipped_names)))}")
+    else:
+        lines.append("skipped_datasets: (none)")
+
     summary_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
@@ -480,6 +588,11 @@ def main() -> None:
     parser.add_argument(
         "--model-path",
         default="ckpt/TabPFN-2.5/tabpfn-v2.5-classifier-v2.5_default.ckpt",
+    )
+    parser.add_argument(
+        "--skip-file",
+        default="skip.txt",
+        help="Optional newline-delimited skip list. Missing files are ignored.",
     )
     parser.add_argument("--workers", type=int, default=8)
     parser.add_argument("--gpus", default="0,1,2,3,4,5,6,7")
@@ -528,15 +641,19 @@ def main() -> None:
         raise FileNotFoundError(f"Root directory not found: {root}")
 
     model_path = normalize_local_ckpt_path(args.model_path)
+    skip_file = resolve_optional_path(root, args.skip_file)
+    skip_entries = load_skip_entries(skip_file)
 
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
     benchmark_specs = [x.strip() for x in args.benchmarks.split(",") if x.strip()]
     benchmark_names = [name for name, _ in parse_benchmark_specs(root, benchmark_specs)]
-    tasks, discovered = build_tasks(root, benchmark_specs)
+    tasks, discovered, skipped = build_tasks(root, benchmark_specs, skip_entries)
     if not tasks:
-        raise FileNotFoundError("No single-file classification CSVs found in the configured benchmark directories.")
+        raise FileNotFoundError(
+            "No single-file classification CSVs remain after benchmark discovery and skip filtering."
+        )
 
     gpu_ids = [int(x.strip()) for x in args.gpus.split(",") if x.strip()]
     if len(gpu_ids) != args.workers:
@@ -566,16 +683,22 @@ def main() -> None:
 
     start_time = time.time()
     ready_queue: mp.Queue = mp.Queue()
+    task_queue: mp.Queue = mp.Queue()
     start_event = mp.Event()
     processes: List[mp.Process] = []
+
+    for task in tasks:
+        task_queue.put(task)
+    for _ in range(args.workers):
+        task_queue.put(None)
+
     for worker_id in range(args.workers):
-        task_items = shard_items(tasks, args.workers, worker_id)
         proc = mp.Process(
             target=run_worker,
             args=(
                 worker_id,
                 gpu_ids[worker_id],
-                task_items,
+                task_queue,
                 ready_queue,
                 start_event,
                 str(out_dir / f"worker_{worker_id}.csv"),
@@ -633,20 +756,38 @@ def main() -> None:
     all_df.to_csv(all_csv, index=False)
 
     wall_seconds = time.time() - start_time
-    write_summary(out_dir / "summary.txt", all_df, sum(discovered.values()), wall_seconds)
+    skipped_all = [name for names in skipped.values() for name in names]
+    write_summary(
+        out_dir / "summary.txt",
+        all_df,
+        sum(discovered.values()),
+        skipped_all,
+        wall_seconds,
+    )
 
     for benchmark in benchmark_names:
         benchmark_dir = out_dir / benchmark
         benchmark_dir.mkdir(parents=True, exist_ok=True)
-        benchmark_df = all_df[all_df["benchmark"] == benchmark].copy() if len(all_df) else pd.DataFrame(columns=columns)
+        benchmark_df = (
+            all_df[all_df["benchmark"] == benchmark].copy()
+            if len(all_df)
+            else pd.DataFrame(columns=columns)
+        )
         benchmark_df.to_csv(benchmark_dir / "all_classification_results.csv", index=False)
-        write_summary(benchmark_dir / "summary.txt", benchmark_df, discovered.get(benchmark, 0), wall_seconds)
+        write_summary(
+            benchmark_dir / "summary.txt",
+            benchmark_df,
+            discovered.get(benchmark, 0),
+            skipped.get(benchmark, []),
+            wall_seconds,
+        )
 
     print(f"saved_all_csv: {all_csv}")
     print(f"saved_summary: {out_dir / 'summary.txt'}")
     print("saved_benchmark_summaries:")
     for benchmark in benchmark_names:
         print(f"  {benchmark}: {out_dir / benchmark / 'summary.txt'}")
+    print(f"skip_file: {skip_file if skip_file and skip_file.exists() else '(none)'}")
     print("model_kwargs:")
     print(json.dumps(model_kwargs, indent=2, ensure_ascii=False))
 

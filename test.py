@@ -329,6 +329,7 @@ def run_worker(
     verbose: bool,
 ) -> None:
     ensure_runtime_deps()
+
     try:
         gpu_id_str = str(gpu_id)
         os.environ["ROCR_VISIBLE_DEVICES"] = gpu_id_str
