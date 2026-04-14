@@ -1,0 +1,9 @@
+discovered_datasets: 25
+processed_datasets: 25
+ok_count: 25
+failed_count: 0
+avg_accuracy_ok: 0.844474
+avg_f1_weighted_ok: 0.837775
+avg_logloss_ok: 0.420879
+wall_seconds: 235201.926
+failed_datasets: (none)
